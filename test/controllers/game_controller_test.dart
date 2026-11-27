@@ -1,12 +1,15 @@
 import 'dart:async';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:connect_four_flutter/controllers/game_controller.dart';
 import 'package:connect_four_flutter/logic/board_engine.dart';
 import 'package:connect_four_flutter/logic/cpu_ai.dart';
 import 'package:connect_four_flutter/models/cpu_difficulty.dart';
+import 'package:connect_four_flutter/models/game_state.dart';
 import 'package:connect_four_flutter/models/player.dart';
+import 'package:connect_four_flutter/services/game_storage_service.dart';
 
 class _ScriptedCpuAi extends CpuAi {
   _ScriptedCpuAi(this.moves);
@@ -34,6 +37,20 @@ class _CompleterCpuAi extends CpuAi {
     pendingCompleter = completer;
     return completer.future;
   }
+}
+
+class _MemoryGameStorage extends GameStorageService {
+  GameSnapshot? snapshot;
+  final List<GameSnapshot> savedSnapshots = [];
+
+  @override
+  Future<void> saveSnapshot(GameSnapshot snapshot) async {
+    this.snapshot = snapshot;
+    savedSnapshots.add(snapshot);
+  }
+
+  @override
+  Future<GameSnapshot?> loadSnapshot() async => snapshot;
 }
 
 void main() {
@@ -284,5 +301,124 @@ void main() {
       expect(controller.difficulty, CpuDifficulty.hard);
       expect(notifications, 1);
     });
+
+    testWidgets('persiste em background e retoma turno pendente da CPU', (tester) async {
+      final storage = _MemoryGameStorage();
+      final firstController = GameController(
+        ai: _ScriptedCpuAi([2]),
+        cpuMoveDelay: const Duration(seconds: 1),
+        storage: storage,
+      );
+      var firstControllerDisposed = false;
+      addTearDown(() {
+        if (!firstControllerDisposed) firstController.dispose();
+      });
+      await firstController.initialize();
+
+      firstController.setDifficulty(CpuDifficulty.hard);
+      firstController.playHumanColumn(3);
+      expect(firstController.isCpuThinking, isTrue);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+
+      expect(storage.snapshot, isNotNull);
+      expect(storage.snapshot!.board[BoardEngine.indexOf(5, 3)], Player.human);
+      expect(storage.snapshot!.isCpuTurnPending, isTrue);
+      expect(storage.snapshot!.difficulty, CpuDifficulty.hard);
+
+      firstController.dispose();
+      firstControllerDisposed = true;
+      final resumedAi = _ScriptedCpuAi([2]);
+      final restoredController = GameController(ai: resumedAi, cpuMoveDelay: Duration.zero, storage: storage);
+      addTearDown(restoredController.dispose);
+      await restoredController.initialize();
+
+      expect(restoredController.isCpuThinking, isTrue);
+      expect(restoredController.difficulty, CpuDifficulty.hard);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pump();
+
+      expect(resumedAi.calls, 1);
+      expect(restoredController.isCpuThinking, isFalse);
+      expect(restoredController.board[BoardEngine.indexOf(5, 2)], Player.cpu);
+      expect(restoredController.moves, 2);
+    });
+
+    testWidgets('restaura placar e dificuldade salvos', (tester) async {
+      final storage = _MemoryGameStorage()
+        ..snapshot = GameSnapshot(
+          board: BoardEngine.createEmptyBoard(),
+          isGameOver: false,
+          isCpuTurnPending: false,
+          winner: Player.none,
+          winCells: const {},
+          moves: 0,
+          humanWins: 4,
+          cpuWins: 2,
+          draws: 1,
+          difficulty: CpuDifficulty.hard,
+        );
+      final controller = GameController(storage: storage);
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+
+      expect(controller.humanWins, 4);
+      expect(controller.cpuWins, 2);
+      expect(controller.draws, 1);
+      expect(controller.difficulty, CpuDifficulty.hard);
+    });
+
+    test('não notifica nem agenda CPU se dispose ocorrer durante initialize', () async {
+      final completer = Completer<GameSnapshot?>();
+      final storage = _PendingLoadStorage(completer);
+      final ai = _ScriptedCpuAi([3]);
+      final controller = GameController(
+        ai: ai,
+        cpuMoveDelay: Duration.zero,
+        storage: storage,
+      );
+
+      var notifications = 0;
+      controller.addListener(() => notifications++);
+
+      final initFuture = controller.initialize();
+      controller.dispose();
+
+      completer.complete(
+        GameSnapshot(
+          board: BoardEngine.createEmptyBoard(),
+          isGameOver: false,
+          isCpuTurnPending: true,
+          winner: Player.none,
+          winCells: const {},
+          moves: 0,
+          humanWins: 1,
+          cpuWins: 0,
+          draws: 0,
+          difficulty: CpuDifficulty.medium,
+        ),
+      );
+
+      await initFuture;
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(notifications, 0);
+      expect(ai.calls, 0);
+    });
   });
+}
+
+class _PendingLoadStorage extends GameStorageService {
+  _PendingLoadStorage(this.completer);
+
+  final Completer<GameSnapshot?> completer;
+
+  @override
+  Future<GameSnapshot?> loadSnapshot() => completer.future;
+
+  @override
+  Future<void> saveSnapshot(GameSnapshot snapshot) async {}
 }
