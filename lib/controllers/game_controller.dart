@@ -62,18 +62,20 @@ class GameController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> initialize() => _initialization ??= _initialize();
 
   Future<void> _initialize() async {
-    if (_isInitialized) return;
+    if (_isInitialized || _isDisposed) return;
     _isInitialized = true;
     _isRestoring = true;
     WidgetsBinding.instance.addObserver(this);
 
     try {
       final snapshot = await _storage.loadSnapshot();
+      if (_isDisposed) return;
       if (snapshot != null) {
         _restoreSnapshot(snapshot);
         notifyListeners();
       }
     } catch (error, stackTrace) {
+      if (_isDisposed) return;
       FlutterError.reportError(
         FlutterErrorDetails(
           exception: error,
@@ -86,6 +88,7 @@ class GameController extends ChangeNotifier with WidgetsBindingObserver {
       _isRestoring = false;
     }
 
+    if (_isDisposed) return;
     if (_isCpuThinking &&
         WidgetsBinding.instance.lifecycleState != AppLifecycleState.inactive &&
         WidgetsBinding.instance.lifecycleState != AppLifecycleState.paused &&

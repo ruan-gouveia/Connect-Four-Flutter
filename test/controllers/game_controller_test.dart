@@ -370,5 +370,55 @@ void main() {
       expect(controller.draws, 1);
       expect(controller.difficulty, CpuDifficulty.hard);
     });
+
+    test('não notifica nem agenda CPU se dispose ocorrer durante initialize', () async {
+      final completer = Completer<GameSnapshot?>();
+      final storage = _PendingLoadStorage(completer);
+      final ai = _ScriptedCpuAi([3]);
+      final controller = GameController(
+        ai: ai,
+        cpuMoveDelay: Duration.zero,
+        storage: storage,
+      );
+
+      var notifications = 0;
+      controller.addListener(() => notifications++);
+
+      final initFuture = controller.initialize();
+      controller.dispose();
+
+      completer.complete(
+        GameSnapshot(
+          board: BoardEngine.createEmptyBoard(),
+          isGameOver: false,
+          isCpuTurnPending: true,
+          winner: Player.none,
+          winCells: const {},
+          moves: 0,
+          humanWins: 1,
+          cpuWins: 0,
+          draws: 0,
+          difficulty: CpuDifficulty.medium,
+        ),
+      );
+
+      await initFuture;
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(notifications, 0);
+      expect(ai.calls, 0);
+    });
   });
+}
+
+class _PendingLoadStorage extends GameStorageService {
+  _PendingLoadStorage(this.completer);
+
+  final Completer<GameSnapshot?> completer;
+
+  @override
+  Future<GameSnapshot?> loadSnapshot() => completer.future;
+
+  @override
+  Future<void> saveSnapshot(GameSnapshot snapshot) async {}
 }
