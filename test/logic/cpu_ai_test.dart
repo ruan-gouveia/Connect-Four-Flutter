@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:connect_four_flutter/logic/board_engine.dart';
@@ -24,43 +25,70 @@ void main() {
   group('CpuAi', () {
     final ai = CpuAi();
 
-    test('vence quando pode completar quatro fichas em um lance', () {
+    test('vence quando pode completar quatro fichas em um lance', () async {
       final board = BoardEngine.createEmptyBoard();
       _drop(board, 0, Player.cpu);
       _drop(board, 1, Player.cpu);
       _drop(board, 2, Player.cpu);
       final originalBoard = List<Player>.of(board);
 
-      expect(ai.chooseMove(board, CpuDifficulty.hard), 3);
+      expect(await ai.chooseMove(board, CpuDifficulty.hard), 3);
       expect(board, originalBoard);
     });
 
-    test('bloqueia a vitória imediata do humano no modo difícil', () {
-      final board = BoardEngine.createEmptyBoard();
-      _drop(board, 0, Player.human);
-      _drop(board, 1, Player.human);
-      _drop(board, 2, Player.human);
+    test(
+      'bloqueia a vitória horizontal imediata do humano no modo difícil',
+      () async {
+        final board = BoardEngine.createEmptyBoard();
+        _drop(board, 0, Player.human);
+        _drop(board, 1, Player.human);
+        _drop(board, 2, Player.human);
 
-      expect(ai.chooseMove(board, CpuDifficulty.hard), 3);
+        expect(await ai.chooseMove(board, CpuDifficulty.hard), 3);
+      },
+    );
+
+    test('bloqueia uma ameaça vertical imediata no modo difícil', () async {
+      final board = BoardEngine.createEmptyBoard();
+      _drop(board, 3, Player.human);
+      _drop(board, 3, Player.human);
+      _drop(board, 3, Player.human);
+
+      expect(await ai.chooseMove(board, CpuDifficulty.hard), 3);
     });
 
-    test('prioriza a coluna central em um tabuleiro vazio', () {
+    test('bloqueia uma ameaça diagonal imediata no modo difícil', () async {
+      final board = BoardEngine.createEmptyBoard();
+      _drop(board, 0, Player.human);
+      _drop(board, 1, Player.cpu);
+      _drop(board, 1, Player.human);
+      _drop(board, 2, Player.cpu);
+      _drop(board, 2, Player.cpu);
+      _drop(board, 2, Player.human);
+      _drop(board, 3, Player.human);
+      _drop(board, 3, Player.cpu);
+      _drop(board, 3, Player.cpu);
+
+      expect(await ai.chooseMove(board, CpuDifficulty.hard), 3);
+    });
+
+    test('prioriza a coluna central em um tabuleiro vazio', () async {
       expect(
-        ai.chooseMove(BoardEngine.createEmptyBoard(), CpuDifficulty.hard),
+        await ai.chooseMove(BoardEngine.createEmptyBoard(), CpuDifficulty.hard),
         3,
       );
     });
 
-    test('retorna -1 quando a partida já terminou', () {
+    test('retorna -1 quando a partida já terminou', () async {
       final board = BoardEngine.createEmptyBoard();
       for (var col = 0; col < 4; col++) {
         _drop(board, col, Player.human);
       }
 
-      expect(ai.chooseMove(board, CpuDifficulty.hard), -1);
+      expect(await ai.chooseMove(board, CpuDifficulty.hard), -1);
     });
 
-    test('retorna -1 em empate sem colunas disponíveis', () {
+    test('retorna -1 em empate sem colunas disponíveis', () async {
       final board = BoardEngine.createEmptyBoard();
       for (var row = 0; row < BoardEngine.rows; row++) {
         for (var col = 0; col < BoardEngine.cols; col++) {
@@ -72,20 +100,38 @@ void main() {
       }
 
       expect(BoardEngine.isDraw(board), isTrue);
-      expect(ai.chooseMove(board, CpuDifficulty.hard), -1);
+      expect(await ai.chooseMove(board, CpuDifficulty.hard), -1);
     });
 
-    test('retorna somente uma coluna disponível nos níveis aleatórios', () {
-      final board = BoardEngine.createEmptyBoard();
-      final availableColumns = <int>{0, 1, 2, 3, 4, 5, 6};
-      final aiWithSeed = CpuAi(random: math.Random(0));
+    test(
+      'retorna somente uma coluna disponível nos níveis aleatórios',
+      () async {
+        final board = BoardEngine.createEmptyBoard();
+        final availableColumns = <int>{0, 1, 2, 3, 4, 5, 6};
+        final aiWithSeed = CpuAi(random: math.Random(0));
 
-      for (final difficulty in [CpuDifficulty.easy, CpuDifficulty.medium]) {
-        expect(
-          availableColumns.contains(aiWithSeed.chooseMove(board, difficulty)),
-          isTrue,
-        );
-      }
+        for (final difficulty in [CpuDifficulty.easy, CpuDifficulty.medium]) {
+          expect(
+            availableColumns.contains(
+              await aiWithSeed.chooseMove(board, difficulty),
+            ),
+            isTrue,
+          );
+        }
+      },
+    );
+
+    test('cede o event loop durante a busca no modo difícil', () async {
+      var eventLoopRan = false;
+      Timer.run(() => eventLoopRan = true);
+
+      final move = await ai.chooseMove(
+        BoardEngine.createEmptyBoard(),
+        CpuDifficulty.hard,
+      );
+
+      expect(move, 3);
+      expect(eventLoopRan, isTrue);
     });
   });
 }
